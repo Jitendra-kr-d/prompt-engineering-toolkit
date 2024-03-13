@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Image Upload</title>
+	<style>
+        .horizontal-container {
+            display: flex;
+            justify-content: space-between;
+            border: 2px solid #333;
+            padding: 10px;
+        }
+
+        .vertical-container {
+            flex: 1;
+            border: 2px solid #666;
+            padding: 10px;
+        }
+		
+		#loader {
+            border: 12px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 12px solid #444444;
+            width: 70px;
+            height: 70px;
+            animation: spin 1s linear infinite;
+			display: none;
+        }
+ 
+        .center {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            margin: auto;
+        }
+ 
+        @keyframes spin {
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+    </style>
+</head>
+<body>
+	<div id="loader" class="center"></div>
+	<div class = "horizontal-container">
+		<div class = "vertical-container">
+			<h1>Image Upload</h1>
+			<input type="file" id="imageFile" accept="image/*,application/*" onchange="uploadImage()">
+			<br><br>
+			<div id="processedImages"></div>
+			<!--<img id="processedImage" src="" alt="Processed Image" width="600" height="700">-->
+		</div>
+		<div class = "vertical-container">
+			<h1>Get JSON</h1>
+			<input type="button" id="jsonFile" onclick="getJson()" value="download json">
+			<br><br>
+			<div id="output"></div>
+		</div>
+	</div>
+    <script>
+		function getJson(){
+			fetch('http://127.0.0.1:5000/get_json_file') // Replace with the API endpoint
+                .then(response => response.json())
+                .then(data => {
+                    // Create a Blob containing the JSON data
+                    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+
+                    // Create a URL for the Blob
+                    const url = window.URL.createObjectURL(blob);
+
+                    // Create a temporary <a> element to trigger the download
+                    const a = document.createElement('a');
+                    a.href = url;
+					debugger;
+                    a.download = data.filename || 'default.json'; // Specify the desired file name
+                    document.body.appendChild(a);
+
+                    // Trigger a click event to initiate the download
+                    a.click();
+
+                    // Cleanup
+                    window.URL.revokeObjectURL(url);
+                })
+                .catch(error => console.error('Error:', error));
+		}
+        function uploadImage() {
+            document.querySelector(
+                    "#loader").style.display = "block";
+            const imageFile = document.getElementById('imageFile').files[0];
+            if (!imageFile) {
+                alert('Please select an image file.');
+                return;
+            }
+			debugger;
+            const formData = new FormData();
+            formData.append('image', imageFile);
+			
+			function prettifyJSON(jsonData) {
+				const jsonString = JSON.stringify(jsonData, null, 2); // Indent with 2 spaces
+				document.getElementById('output').textContent = jsonString;
+			}
+			console.log("resquest: ", formData.get('image'))
+            fetch('http://127.0.0.1:5000/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+				prettifyJSON(data.processed_json);
+				//const processedImages = document.getElementById('processedImage');
+				document.getElementById("processedImages").innerHTML = '';
+				for(var i = 0; i<data.processed_image.length; i++){
+					var elem = document.createElement("img");
+					  elem.setAttribute("src", 'data:image/png;base64,' + data.processed_image[i]);
+					  elem.setAttribute("height", "700");
+					  elem.setAttribute("width", "600");
+					  document.getElementById("processedImages").appendChild(elem);
+				}
+                //processedImage.src = 'data:image/png;base64,' + data.processed_image;
+                
+            })
+			.finally(() => {
+				// Hide the loader element.
+				document.querySelector("#loader").style.display = "none";
+			  })
+            .catch(error => console.error('Error:', error));
+        }
+    </script>
+</body>
+</html>
