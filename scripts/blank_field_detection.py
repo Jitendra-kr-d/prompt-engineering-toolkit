@@ -18,7 +18,7 @@ from bs4 import BeautifulSoup
 import subprocess
 import tempfile
 import os
-import math
+import platform
 Image.MAX_IMAGE_PIXELS = 933120000
 
 
@@ -91,6 +91,7 @@ class Utils():
         # return the resized image
         return resized
 
+
 class BoundingBox:
     def __init__(self, x, y, w, h, type = "BOX"):
         self.x = x
@@ -103,7 +104,7 @@ class BoundingBox:
         return self.Type
         
     def is_checkbox(self):
-        return ((self.w==self.h) or abs(self.w-self.h)<20) or (self.w<30 and self.h<30)
+        return ((self.w==self.h) or abs(self.w-self.h)<10) or (self.w<30 and self.h<30)
     
     def get_coordinates(self):
         return (self.x, self.y, self.w, self.h)
@@ -115,13 +116,13 @@ class BoundingBox:
         return BoundingBox((self.x*width)/100,(self.y*height)/100,(self.w*width)/100,(self.h*height)/100)
 
     def draw(self, image, color = (0, 255, 0)):
-        cv2.rectangle(image, (int(round(self.x)), int(round(self.y))), (int(round(self.x + self.w)), int(round(self.y + self.h))), color, -1)
+        cv2.rectangle(image, (int(round(self.x)), int(round(self.y))), (int(round(self.x + self.w)), int(round(self.y + self.h))), color, 2)
 
     def mask(self, image):
         cv2.rectangle(image, (int(round(self.x)), int(round(self.y))), (int(round(self.x + self.w)), int(round(self.y + self.h))), (0, 0, 0), -1)
 
     def is_valid(self, width, height, ocr = None):
-        valid = self.x>10 and self.y>10 and (self.x+self.w)<(width-10) and (self.y+self.h)<(height-10) and self.w<(width//2) and self.h<(height//2) and self.w>15 and self.h>15
+        valid = self.x>10 and self.y>10 and (self.x+self.w)<(width-10) and (self.y+self.h)<(height-10) and self.w<(width//2) and self.h<(height//2) and self.w>20 and self.h>20
 ##        if valid and not self.is_checkbox():
 ##            filter_box = []
 ##            if self.y<(2*self.h):
@@ -144,7 +145,7 @@ class BoundingBox:
 
 
 class BlankFieldDetectorFilteredWithOcr:
-  def __init__(self, filepath = None, image = None):
+  def __init__(self, scriptPath, filepath = None, image = None):
       if(image is None and filepath is not None):
             self.Image = cv2.imread(filepath, cv2.IMREAD_COLOR)
       else:
@@ -157,7 +158,7 @@ class BlankFieldDetectorFilteredWithOcr:
       self.rect_box_detector = RectBoxDetector(image = self.Image)
       self.line_box_detector = LineBoxDetector(image = self.Image,rect_box_detector = self.rect_box_detector)
       self.circle_box_detector = CircleBoxDetector(image = self.Image,rect_box_detector = self.rect_box_detector, line_box_detector = self.line_box_detector)
-      self.ocr = OCRModel(image = self.Image)
+      self.ocr = OCRModel(scriptPath, image = self.Image)
       self.CheckBox_fields = self.rect_box_detector.detect_checkboxes()
       self.TextBox_fields = self.line_box_detector.Boxes + self.rect_box_detector.detect_textboxes()
       self.RadioButton_fields = self.circle_box_detector.Circles
@@ -243,21 +244,27 @@ class BlankFieldDetectorFilteredWithOcr:
       return image
 
 class OCRModel:
-    def __init__(self,filepath = None, image = None):
+    def __init__(self, scriptPath,filepath = None, image = None):
         # self.model = lp_ocr.TesseractAgent().with_tesseract_executable(tesseract_path)
         if(image is None and filepath is not None):
             self.Image = cv2.imread(filepath)
         else:
             self.Image = image.copy()
         # self.filepath = filepath
-        self.TesseractPath = os.path.join('field_extractor','external_services','Tesseract-OCR','tesseract.exe')
+        self.ScriptPath = scriptPath
+        if platform.system()=="Windows":
+          self.TesseractPath = os.path.join(scriptPath,'external_services','Tesseract-OCR','tesseract.exe')
+        elif platform.system()=="Linux":
+           self.TesseractPath = "tesseract"
+        else:
+           raise SystemError("not supported for",platform.system())
         self.ocr_result = self.detect()
 
     def detect(self):
         # ocr_response = self.model.detect(self.Image.copy(), return_response=True)
         # ocr  = self.model.gather_data(ocr_response, lp.TesseractFeatureType(4))
         return self.detect_tesseract()
-
+    
     def preprocess(self):
       img = cv2.cvtColor(self.Image, cv2.COLOR_BGR2GRAY)
       # kernal = np.array([[0,-1,0],[-1,5,-1],[0,-1,0]])
@@ -288,11 +295,11 @@ class OCRModel:
               word_text = word.get_text()
               bbox = word['title'].split(';')[0].split('bbox ')[1]
               extracted_data.append({'text': word_text, 'bbox': list(map(int,bbox.split()))})
+          
           return extracted_data
-      
       with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as temp_image:
             # Save the image data to the temporary file
-            cv2.imwrite(temp_image.name, self.preprocess())#self.preprocess()
+            cv2.imwrite(temp_image.name, self.preprocess())
       # OCR Engine Mode (OEM) and Page Segmentation Mode (PSM) options
       oem = 3  # OEM_TESSERACT_ONLY
       psm = 3  # PSM_AUTO
@@ -310,9 +317,7 @@ class OCRModel:
           # Run Tesseract using subprocess and capture the hocr output
           hocr_output = subprocess.check_output(tesseract_command, stderr=subprocess.PIPE)
           hocr_text = hocr_output.decode("utf-8").strip()
-          # f=open("myfile.txt","w")
-          # f.write(hocr_text)
-          # f.close()
+      
           extracted_data = extract_data(hocr_text)
           return extracted_data
       except subprocess.CalledProcessError as e:
@@ -324,12 +329,9 @@ class OCRModel:
         fields = {'txt_fields':[],'non_txt_fields':[],'colon_txt_fields':[],'word_fields':[],'money_txt_fields':[]}
         for txt_blck in self.ocr_result:
           box = txt_blck['bbox']
-          # fields['txt_fields'].append([*box, txt_blck['text']])
           if(txt_blck['text'].strip()=='$'):
               fields['money_txt_fields'].append([*box, txt_blck['text']])
-          if(txt_blck['text'].strip()!='' and txt_blck['text'] != '' and txt_blck is not None and len(txt_blck['text'])>1):
-            # if ("o" in txt_blck['text'].lower() and txt_blck['text'].lower() not in ["of","on","so","to","do"]):
-            #    continue
+          if(txt_blck['text'].strip()!='' and txt_blck['text'] != '' and txt_blck is not None and len(txt_blck['text'])>2):
             fields['txt_fields'].append([*box, txt_blck['text']])
             if(txt_blck['text'].endswith(':')):
               fields['colon_txt_fields'].append([*box,  txt_blck['text']])
@@ -405,8 +407,6 @@ class OCRModel:
         ocr_fields = self.extract_fields()
         word_fields = ocr_fields['txt_fields']
         final_filter_fields=[]#ff+new_fields
-        # for j in word_fields:
-        #    final_filter_fields.append(BoundingBox(j[0],j[1],j[2]-j[0],j[3]-j[1]))
         for box in fields:
             i = list(box.get_coordinates())
             i[2] = i[0]+i[2]#+5
@@ -428,7 +428,6 @@ class BlankFieldDetector:
         self.Image = cv2.imread(filepath)
       else:
         self.Image = image.copy()
-      
       h, w, c=self.Image.shape
       self.shape = (w,h)
       self.rect_box_detector = RectBoxDetector(image = self.Image)
@@ -558,14 +557,7 @@ class CircleBoxDetector:
           # roi = image[n[1]:n[3],n[0]:n[2]]
           # if(np.all(roi==255)):
             ((x,y),r)=cv2.minEnclosingCircle(c)
-            #w=h=(2*r)/sqrt(2)
-            #y1 = (r/sqrt(2))+y
-            #x1 = (r/sqrt(2))+x
             # fields.append([int(x-r),int(y-r),int(x+r),int(y+r)])
-            # w = h = (2 * r) / math.sqrt(2)
-            # y1 = (r / math.sqrt(2)) + y
-            # x1 = (r / math.sqrt(2)) + x
-            # roi = temp_img[int(y1):int(y1)+int(h),int(x1):int(x1)+int(w)]
             roi = temp_img[int(y)-int(r)//2:int(y)+int(r)//2,int(x)-int(r)//2:int(x)+int(r)//2]
             if(np.all(roi>250)):
               fields.append(BoundingBox(int(x-r), int(y-r), 2*int(r), 2*int(r)))

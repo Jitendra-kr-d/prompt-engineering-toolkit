@@ -21,7 +21,7 @@ def process_image(file_bytes,filename):
     if file_bytes is not None:
         detect = detector.Detection()
         # Replace this with your desired image processing logic
-        res = detect.get_detection(filename,file_bytes)
+        res = detect.get_detection(filename,file_bytes,"/media/jitendra-aj/AJ/python_field_detection/field-detection")
         # print(res)
         json_fields, proccessed = res
         #img = field_detector.processed_image()
